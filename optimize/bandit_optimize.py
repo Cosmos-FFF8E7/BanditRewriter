@@ -38,7 +38,6 @@ class BanditOptimizer:
         self.clip_scorer = CLIPScorer()
         self.aesthetic_scorer = AestheticScorer()
 
-        # 评分权重
         self.lambda_weight = config.get("lambda", 0.6) if config else 0.6
 
     def score_prompt(self, prompt: str, raw_prompt: str) -> float:
