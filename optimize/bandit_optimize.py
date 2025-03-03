@@ -6,7 +6,7 @@ from typing import List, Dict, Tuple, Any, Optional
 
 from .beam_search import beam_search
 from evaluate.metrics import CLIPScorer, AestheticScorer
-from data.dataset import Dataset
+from data.br_dataset import BRDataset
 from models.llm_wrapper import LLMWrapper
 from models.t2i_wrapper import T2IWrapper
 
@@ -121,7 +121,7 @@ class BanditOptimizer:
 
         return new_candidates
 
-    def optimize(self, dataset: Dataset) -> str:
+    def optimize(self, dataset: BRDataset) -> str:
         logger.info("Starting optimization process")
 
         # Step 1: Expand the dataset with raw prompts
