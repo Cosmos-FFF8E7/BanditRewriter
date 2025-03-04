@@ -12,6 +12,20 @@ The code repository for the paper *BanditRewriter: Training-free Model Adaptive 
 </details>
 
 
+## Datasets
+We evaluate on the following datasets:
+* [DiffusionDB](https://github.com/poloclub/diffusiondb)
+* [Lexica](https://huggingface.co/datasets/Gustavosta/Stable-Diffusion-Prompts)
+* [midjourney-v6](https://huggingface.co/datasets/CortexLM/midjourney-v6)
+* [Dalle3 1 Million+ High Quality Captions](https://huggingface.co/datasets/ProGamerGov/synthetic-dataset-1m-dalle3-high-quality-captions)
+
+## Evaluation Metrics
+Our evaluation uses the following metrics:
+* [CLIP Score](https://arxiv.org/abs/2104.08718)
+* [HPSV2](https://arxiv.org/abs/2306.09341)
+* [ImageReward](https://arxiv.org/abs/2304.05977)
+* [Aesthetic Score](https://github.com/discus0434/aesthetic-predictor-v2-5)
+
 ## Setup Environment
 
 ```bash
