@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 import glob
 from io import BytesIO
 import os
@@ -7,6 +8,7 @@ import random
 import logging
 import shutil
 import tarfile
+import threading
 import numpy as np
 from typing import List, Dict, Tuple, Any
 import requests
@@ -17,7 +19,7 @@ import PIL.Image as Image
 
 # 引入huggingface的datasets库
 from datasets import Dataset
-from datasets import load_dataset as hf_load_dataset
+from datasets import load_dataset
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +183,7 @@ def download_dalle3_data(
             print(f"Error downloading shard {filename}: {str(e)}")
 
 
-def load_dataset(path, config):
+def load_br_dataset(path, config):
     dataset = config.get("dataset")
 
     if not dataset:
@@ -205,166 +207,184 @@ def load_dataset(path, config):
 def process_dalle3_data(
     shard_indices: List[int], save_dir: str = "downloaded_data"
 ) -> Dataset:
-    os.makedirs(save_dir, exist_ok=True)
-    dataset_path = os.path.join(save_dir, "dalle3_dataset")
+    dataset_root_path = "datasets"
+    dataset_path = "dalle3_dataset"
+    full_path = os.path.join(dataset_root_path, dataset_path)
 
-    # 如果数据集已存在，直接加载
-    if os.path.exists(dataset_path):
-        dataset = Dataset.load_from_disk(dataset_path)
-        print(f"Loaded dataset with {len(dataset)} samples")
-        return dataset
+    # Check if dataset exists locally
+    if os.path.exists(full_path):
+        print(f"Loading existing dataset from {full_path}")
+        return Dataset.load_from_disk(full_path)
 
-    # 检查每个分片是否已下载，如果没有则下载
-    for shard_index in shard_indices:
-        shard_path = os.path.join(save_dir, f"data-{shard_index:06d}.tar")
-        if not os.path.exists(shard_path):
-            print(f"Shard {shard_index} not found, downloading...")
-            download_dalle3_data(shard_indices, save_dir)
+    print("Dataset not found locally, processing from downloaded shards...")
 
-    # 首次处理
     all_data = {"prompt": [], "image": []}
 
+    # Process each shard
     for shard_index in tqdm(shard_indices, desc="Processing DALL-E 3 dataset"):
         shard_path = os.path.join(save_dir, f"data-{shard_index:06d}.tar")
         extract_dir = os.path.join(save_dir, f"data-{shard_index:06d}")
 
         try:
+            # Download shard if not exists
+            if not os.path.exists(shard_path):
+                print(f"Shard {shard_index} not found, downloading...")
+                download_dalle3_data([shard_index], save_dir)
+
             os.makedirs(extract_dir, exist_ok=True)
             print(f"Processing shard {shard_index} from {shard_path}")
 
-            # 解压整个tar文件
+            # Extract tar file
             with tarfile.open(shard_path, "r") as tar:
                 tar.extractall(extract_dir)
 
-            # 处理所有jpg文件
+            # Process all jpg files
             jpg_files = glob.glob(os.path.join(extract_dir, "*.jpg"))
             print(f"Found {len(jpg_files)} jpg files in shard {shard_index}")
 
-            # 随机选择3000个文件
-            if len(jpg_files) > 3000:
-                import random
-                jpg_files = random.sample(jpg_files, 3000)
+            # Randomly select 2000 files if too many
+            if len(jpg_files) > 2000:
+                jpg_files = random.sample(jpg_files, 2000)
 
-            for jpg_file in tqdm(jpg_files):
+            for jpg_file in tqdm(jpg_files, desc="Processing images"):
                 try:
                     json_file = jpg_file.replace(".jpg", ".json")
-
-                    # 读取JSON数据
+                    
+                    # Read JSON data
                     with open(json_file, "r", encoding="utf-8") as f:
                         json_data = json.load(f)
 
-                    # 验证文件是否存在
-                    if not os.path.exists(jpg_file):
-                        print(f"Warning: {jpg_file} does not exist")
-                        continue
-
-                    # 直接加载图片为PIL Image对象
+                    # Load and convert image
                     with Image.open(jpg_file) as img:
                         image = img.convert("RGB")
+                        image = image.resize((512, 512))
 
                     all_data["prompt"].append(json_data["long_caption"])
                     all_data["image"].append(image)
 
-                    # 如果已经收集了3000个样本，就停止
-                    if len(all_data["prompt"]) >= 3000:
-                        break
-
                 except Exception as e:
-                    logger.error(f"Error processing {jpg_file}: {str(e)}")
+                    print(f"Error processing {jpg_file}: {str(e)}")
                     continue
 
-            # 如果已经收集了3000个样本，就停止处理其他分片
-            if len(all_data["prompt"]) >= 3000:
-                break
-
         except Exception as e:
-            logger.error(f"Error processing shard {shard_index}: {str(e)}")
+            print(f"Error processing shard {shard_index}: {str(e)}")
             continue
 
     print(f"Total samples collected: {len(all_data['prompt'])}")
 
-    # 创建并保存数据集
-    print("Creating dataset...")
+    # Create and save dataset
     dataset = Dataset.from_dict(all_data)
-    print("Saving dataset...")
-    dataset.save_to_disk(dataset_path)
-    print(f"Saved dataset with {len(dataset)} samples")
+    
+    # Ensure directory exists
+    os.makedirs(full_path, exist_ok=True)
+    dataset.save_to_disk(full_path)
 
+    print(f"Dataset saved with {len(dataset)} samples")
     return dataset
 
 
 def process_diffusiondb_data(subset="large_random_1k"):
-    dataset = load_dataset("poloclub/diffusiondb", subset)
-    """
-    {'image': <PIL.WebPImagePlugin.WebPImageFile image mode=RGB size=512x512 at 0x2053495C490>, 'prompt': 'nasi goreng, realistic, sharp focus, 8 k high definition, insanely detailed, intricate, elegant, food photography ', 'seed': 2834991788, 'step': 50, 'cfg': 7.0, 'sampler': 'k_lms', 'width': 512, 'height': 512, 'user_name': '0f0c127a510a5c6b9432bf90908973778ad7889628984a092d8de4ee2d5aae37', 'timestamp': datetime.datetime(2022, 8, 15, 8, 13, tzinfo=<UTC>), 'image_nsfw': 0.023086752742528915, 'prompt_nsfw': 0.0018341769464313984}
-    """
-    # 处理成{"prompt": [], "image": []}格式
+    dataset_root_path = "datasets"
+    dataset_path = "diffusiondb_dataset" 
+    full_path = os.path.join(dataset_root_path, dataset_path)
+
+    # Check if dataset exists locally
+    if os.path.exists(full_path):
+        print(f"Loading existing dataset from {full_path}")
+        return Dataset.load_from_disk(full_path)
+
+    print("Dataset not found locally, downloading from Huggingface...")
+    dataset = load_dataset("poloclub/diffusiondb", subset)["train"]
     all_data = {"prompt": [], "image": []}
     for item in dataset:
         all_data["prompt"].append(item["prompt"])
         all_data["image"].append(item["image"])
 
-    # 创建并保存数据集
+    # Create and save dataset
     dataset = Dataset.from_dict(all_data)
-    dataset.save_to_disk("diffusiondb_dataset")
+    
+    # Ensure directory exists
+    os.makedirs(full_path, exist_ok=True)
+    dataset.save_to_disk(full_path)
 
+    print(f"Dataset saved with {len(dataset)} samples")
     return dataset
 
 
 def process_lexica_data():
-    ds = load_dataset("Gustavosta/Stable-Diffusion-Prompts", "train")
-    # 这个数据集只有prompt，处理成{"prompt": [], "image": []}格式，image留空
+    dataset_root_path = "datasets"
+    dataset_path = "lexica_dataset"
+    full_path = os.path.join(dataset_root_path, dataset_path)
+
+    # Check if dataset exists locally
+    if os.path.exists(full_path):
+        print(f"Loading existing dataset from {full_path}")
+        return Dataset.load_from_disk(full_path)
+
+    print("Dataset not found locally, downloading from Huggingface...")
+    ds = load_dataset("Gustavosta/Stable-Diffusion-Prompts")["train"]
     all_data = {"prompt": [], "image": []}
     for item in ds:
-        all_data["prompt"].append(item["prompt"])
+        all_data["prompt"].append(item["Prompt"]) 
         all_data["image"].append(None)
 
-    # 创建并保存数据集
+    # Create and save dataset
     dataset = Dataset.from_dict(all_data)
-    dataset.save_to_disk("lexica_dataset")
+    
+    # Ensure directory exists
+    os.makedirs(full_path, exist_ok=True)
+    dataset.save_to_disk(full_path)
 
-    print(f"Saved dataset with {len(dataset)} samples")
+    print(f"Dataset saved with {len(dataset)} samples")
     return dataset
 
 
 def process_bittensor_data():
-    ds = load_dataset("CortexLM/midjourney-v6")
+    dataset_root_path = "datasets"
+    dataset_path = "bittensor_dataset" 
+    full_path = os.path.join(dataset_root_path, dataset_path)
 
-    # 取前2000个
+    # Check if dataset exists locally
+    if os.path.exists(full_path):
+        print(f"Loading existing dataset from {full_path}")
+        return Dataset.load_from_disk(full_path)
+
+    print("Dataset not found locally, downloading from Huggingface...")
+    ds = load_dataset("CortexLM/midjourney-v6")["train"]
     ds = ds.select(range(2000))
 
-    # 这个数据集是prompt、image_url格式
     all_data = {"prompt": [], "image": []}
-    for item in ds:
-        all_data["prompt"].append(item["prompt"])
-        # 发送请求下载图片
+    lock = threading.Lock()
+
+    def download_image(item):
         try:
             response = requests.get(item["image_url"])
             response.raise_for_status()
             img = Image.open(BytesIO(response.content))
-            all_data["image"].append(img)
+            # Crop and resize image
+            img = img.crop((0, 0, img.width//2, img.height//2))
+            img = img.resize((512, 512))
+            with lock:
+                all_data["prompt"].append(item["prompt"])
+                all_data["image"].append(img)
         except Exception as e:
             print(f"Error downloading image: {e}")
-            all_data["image"].append(None)
+            with lock:
+                all_data["prompt"].append(item["prompt"]) 
+                all_data["image"].append(None)
 
-    # 由于是midjourny图片，所以需要裁剪画面左上的四分之一保留
-    for i in range(len(all_data["image"])):
-        if all_data["image"][i] is not None:
-            all_data["image"][i] = all_data["image"][i].crop(
-                (
-                    0,
-                    0,
-                    all_data["image"][i].width // 2,
-                    all_data["image"][i].height // 2,
-                )
-            )
-            all_data["image"][i] = all_data["image"][i].resize((512, 512))
+    # Use ThreadPoolExecutor for parallel downloads
+    with ThreadPoolExecutor(max_workers=12) as executor:
+        list(tqdm(executor.map(download_image, ds), total=len(ds), desc="Downloading images"))
 
-    # 创建并保存数据集
+    # Create and save dataset
     dataset = Dataset.from_dict(all_data)
-    dataset.save_to_disk("bittensor_dataset")
+    
+    # Ensure directory exists
+    os.makedirs(full_path, exist_ok=True)
+    dataset.save_to_disk(full_path)
 
-    print(f"Saved dataset with {len(dataset)} samples")
+    print(f"Dataset saved with {len(dataset)} samples")
     return dataset
 
 

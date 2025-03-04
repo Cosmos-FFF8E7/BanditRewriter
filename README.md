@@ -107,7 +107,7 @@ python evaluate/run_eval.py \
 ├── config/
 │   └── config.py          # Configuration settings
 ├── data/
-│   └── br_dataset.py         # Data loading utilities  
+│   └── br_dataset.py      # Data loading utilities  
 ├── optimize/
 │   ├── bandit_optimize.py # UCB optimization
 │   └── beam_search.py     # Beam search implementation

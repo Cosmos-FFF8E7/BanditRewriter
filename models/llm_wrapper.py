@@ -7,6 +7,7 @@ Large Language Model wrapper for BanditRewriter
 
 import os
 import logging
+import textwrap
 import time
 from typing import List, Dict
 
@@ -37,9 +38,7 @@ class LLMWrapper:
         }
 
         self.model_id = self.model_map.get(model, "gpt-4")
-        self.url = self.url = config.get(
-            "openai_url", "https://api.openai.com"
-        )
+        self.url = self.url = config.get("openai_url", "https://api.openai.com")
 
     def call_api(self, messages, temperature=0.7, max_tokens=1024):
         max_retries = 3
@@ -69,57 +68,145 @@ class LLMWrapper:
         messages = [
             {
                 "role": "system",
-                "content": "You are an assistant that helps extract the core theme from detailed prompts.",
+                "content": textwrap.dedent(
+                    """
+                    Instruction: Summarize this image description in 10 words or less and ignore words like archdaily, wallpaper, highly detailed, 8k. Ignore modifiers likes 'portrait of', 'by somebody', 'with xxx' or 'in xxx'. Ignore adjective. Check English.
+
+                    Input: a beautiful very detailed illustration of abandoned urbex unfinished building city nature industrial architecture architecture building spaceport by caspar david friedrich, scumm bar meadow nature synthwave, archdaily, wallpaper, highly detailed, trending on artstation.
+                    Output: <RES>abandoned urban building</RES>
+
+                    Input: realistic detailed face portrait of Angelina Jolie as Salome by Alphonse Mucha, Ayami Kojima, Amano, Charlie Bowater, Karol Bak, Greg Hildebrandt, Jean Delville, and Mark Brooks, Art Nouveau, Neo-Gothic, Surreality, gothic, rich deep moody colors
+                    Output: <RES>Angelina Jolie</RES>
+
+                    Input: A stunning photograph of a majestic snow-capped mountain peak at sunset, with dramatic clouds and golden light, captured with a high-end DSLR camera, ultra HD quality, professional photography
+                    Output: <RES>mountain peak at sunset</RES>
+
+                    Input: An intricate steampunk-inspired mechanical pocket watch with brass gears, ornate Victorian decorations, and glowing crystal elements, created in the style of vintage technical illustrations
+                    Output: <RES>steampunk mechanical pocket watch</RES>
+                    """
+                ),
             },
             {
                 "role": "user",
-                "content": f"Extract the basic theme from this detailed prompt, only return the core theme:\n\n{detailed_prompt}",
+                "content": f"Input: {detailed_prompt}",
             },
         ]
 
-        return self.call_api(messages, temperature=0.3, max_tokens=256).strip()
+        response = self.call_api(messages, temperature=0.3, max_tokens=256).strip()
 
-    def synthesize_optimization_instructions(self, raw_prompt, detailed_prompt):
+        # Extract content between RES tags
+        import re
+
+        match = re.search(r"<RES>(.*?)</RES>", response)
+        if match:
+            return match.group(1).strip()
+        return response.strip()
+
+    def synthesize_optimization_instructions(self, raw_prompt, detailed_prompt) -> str:
         messages = [
             {
                 "role": "system",
-                "content": "You are a T2I prompt engineering expert who can identify effective optimization strategies.",
+                "content": textwrap.dedent(
+                    """
+                    You are a T2I prompt engineering expert who can identify effective optimization strategies.
+                    Please analyze the prompts and provide optimization suggestions.
+                    Wrap your suggestions with <RES></RES> tags.
+                    
+                    Example:
+                    Raw: A cat
+                    Detailed: A fluffy orange tabby cat sitting on windowsill
+                    Optimization suggestions: <RES>Add descriptive details about appearance, setting and lighting. Use specific breed names. Include artistic style references.</RES>
+                    """
+                ),
             },
             {
                 "role": "user",
                 "content": f"""Analyze how the detailed prompt enhances the original theme and provide optimization strategies:
-            
-            Original theme: {raw_prompt}
-            Detailed prompt: {detailed_prompt}
-            
-            Optimization instructions:""",
+                
+                Raw: {raw_prompt}
+                Detailed: {detailed_prompt}
+                
+                Optimization suggestions:""",
             },
         ]
 
-        return self.call_api(messages, temperature=0.7, max_tokens=512).strip()
+        response = self.call_api(messages, temperature=0.7, max_tokens=512).strip()
 
-    def rewrite_prompt(self, raw_prompt, rewrite_template):
+        # Extract content between RES tags
+        import re
+
+        match = re.search(r"<RES>(.*?)</RES>", response)
+        if match:
+            return match.group(1).strip()
+        return response.strip()
+
+    def rewrite_prompt(self, raw_prompt, rewrite_template) -> str:
         messages = [
-            {"role": "system", "content": "You are an expert in optimizing text-to-image generation prompts."},
+            {
+                "role": "system",
+                "content": "You are an expert in optimizing text-to-image generation prompts. Please wrap your optimized prompt with <RES></RES> tags.",
+            },
             {
                 "role": "user",
                 "content": f"{rewrite_template}\n\nNow optimize this original prompt: {raw_prompt}\n\nOptimized prompt:",
             },
         ]
 
-        return self.call_api(messages, temperature=0.7, max_tokens=1024).strip()
+        response = self.call_api(messages, temperature=0.7, max_tokens=1024).strip()
 
-    def expand_prompt_variants(self, prompt, n=5):
+        # Extract content between RES tags
+        import re
+
+        match = re.search(r"<RES>(.*?)</RES>", response)
+        if match:
+            return match.group(1).strip()
+        return response.strip()
+
+    def expand_prompt_variants(self, prompt, n=5) -> List[str]:
         messages = [
-            {"role": "system", "content": "You are a creative assistant capable of generating prompt variants."},
+            {
+                "role": "system",
+                "content": textwrap.dedent(
+                    """
+                    You are a creative assistant specialized in linguistic variations.
+                    Your task is to create prompt variants by:
+                    - Using synonyms and alternative phrasings 
+                    - Maintaining the exact same meaning
+                    - Focusing on vocabulary and grammar changes only
+                    - Keeping the same level of detail as original
+                    - Wrap each variant with <RES></RES> tags
+                """
+                ).strip(),
+            },
             {
                 "role": "user",
-                "content": f"Generate {n} variants of the following prompt by replacing words with synonyms:\n\n{prompt}",
+                "content": textwrap.dedent(
+                    f"""
+                    Generate {n} variants of this prompt by only modifying vocabulary and grammar:
+
+                    Original: {prompt}
+
+                    Rules:
+                    - Use synonyms and alternative word choices
+                    - Keep the exact same meaning
+                    - Don't add new details or style elements
+                    - Focus only on linguistic variations
+                    - Wrap each variant with <RES></RES> tags
+                    
+                    Example format:
+                    <RES>First variant here</RES>
+                    <RES>Second variant here</RES>
+                    
+                    Variants:
+                """
+                ).strip(),
             },
         ]
 
         response = self.call_api(messages, temperature=0.8, max_tokens=1024).strip()
 
-        variants = [line.strip() for line in response.split("\n") if line.strip()]
+        import re
+
+        variants = re.findall(r"<RES>(.*?)</RES>", response)
 
         return variants[:n]
