@@ -11,24 +11,24 @@ import textwrap
 import time
 from typing import List, Dict
 
-import openai
+from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
 
 class LLMWrapper:
-
     def __init__(self, model="gpt4", config=None):
         self.config = config
         self.model = model
         self.url = "https://api.openai.com"
 
+        api_key = None
         if config:
-            openai.api_key = config.get(
-                "openai_key", os.environ.get("OPENAI_API_KEY", "")
-            )
-            if config.get("openai_url") != None:
+            api_key = config.get("openai_key", os.environ.get("OPENAI_API_KEY", ""))
+            if config.get("openai_url"):
                 self.url = config.get("openai_url")
+
+        self.client = OpenAI(api_key=api_key, base_url=self.url)
 
         self.model_map = {
             "gpt4": "gpt-4",
@@ -38,7 +38,6 @@ class LLMWrapper:
         }
 
         self.model_id = self.model_map.get(model, "gpt-4")
-        self.url = self.url = config.get("openai_url", "https://api.openai.com")
 
     def call_api(self, messages, temperature=0.7, max_tokens=1024):
         max_retries = 3
@@ -46,14 +45,14 @@ class LLMWrapper:
 
         for attempt in range(max_retries):
             try:
-                response = openai.ChatCompletion.create(
+                response = self.client.chat.completions.create(
                     model=self.model_id,
                     messages=messages,
                     temperature=temperature,
                     max_tokens=max_tokens,
-                    api_base=self.url + "/v1/chat/completions",
                 )
-                return response.choices[0].message["content"]
+                return response.choices[0].message.content
+
             except Exception as e:
                 logger.warning(
                     f"API call failed (attempt {attempt+1}/{max_retries}): {str(e)}"

@@ -2,3 +2,5 @@ process.py
 downloaded_data/
 datasets/
 __pycache__/
+test/
+outputs/
